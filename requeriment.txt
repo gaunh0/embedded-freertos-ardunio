@@ -1,0 +1,2 @@
+Arduino_FreeRTOS
+Adafruit_SHT31

@@ -1,41 +1,82 @@
+
+
+#include <Adafruit_SHT31.h>
 #include <Arduino_FreeRTOS.h>
+#include <SoftwareSerial.h>
+
+#define NODE 1122
+
+typedef struct {
+  char command; // 'g' for get, 's' for set, 'r' for response
+  unsigned int nodeAddress;
+  int value1; // First value (e.g., temperature or relay state)
+  int value2; // Second value (e.g., humidity or error code)
+} LoRaMessage;
+
+#define BAUDRATE 9600
+#define LORA_M0_PIN 6
+#define LORA_M1_PIN 7
+#define LED_PIN 13
+float humidity;
+float temperature;
+
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
+SoftwareSerial loraSerial(11, 10); // RX, TX
 
 // define two tasks for Sensor & LoraProcess
-void TaskSensor( void *pvParameters );
-void TaskLoraProcess( void *pvParameters );
+void TaskSensor(void *pvParameters);
+void TaskLoraProcess(void *pvParameters);
+LoRaMessage parseLoRaMessage(const char *message);
 
 // the setup function runs once when you press reset or power the board
 void setup() {
-  
+
   // initialize serial communication at 9600 bits per second:
-  Serial.begin(9600);
-  
+  Serial.begin(BAUDRATE);
+  loraSerial.begin(BAUDRATE);
   while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB, on LEONARDO, MICRO, YUN, and other 32u4 based boards.
+    ; // wait for serial port to connect. Needed for native USB, on LEONARDO,
+      // MICRO, YUN, and other 32u4 based boards.
   }
 
+  Serial.println("SHT31 inital");
+  if (!sht31.begin(0x44)) { // Set to 0x45 for alternate i2c addr
+    Serial.println("Couldn't find SHT31");
+    while (1)
+      delay(1);
+  }
+
+  // Just need this piece of code for LORA module
+  pinMode(LORA_M0_PIN, OUTPUT);
+  pinMode(LORA_M1_PIN, OUTPUT);
+  digitalWrite(LORA_M0_PIN, HIGH);
+  digitalWrite(LORA_M1_PIN, HIGH);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
   // Now set up two tasks to run independently.
-  xTaskCreate(
-    TaskSensor
-    ,  "Sensor"   // A name just for humans
-    ,  128  // This stack size can be checked & adjusted by reading the Stack Highwater
-    ,  NULL
-    ,  2  // Priority, with 3 (configMAX_PRIORITIES - 1) being the highest, and 0 being the lowest.
-    ,  NULL );
+  xTaskCreate(TaskSensor, "Sensor" // A name just for humans
+              ,
+              128 // This stack size can be checked & adjusted by reading the
+                  // Stack Highwater
+              ,
+              NULL, 2 // Priority, with 3 (configMAX_PRIORITIES - 1) being the
+                      // highest, and 0 being the lowest.
+              ,
+              NULL);
 
-  xTaskCreate(
-    TaskLoraProcess
-    ,  "LoraProcess"
-    ,  128  // Stack size
-    ,  NULL
-    ,  1  // Priority
-    ,  NULL );
+  xTaskCreate(TaskLoraProcess, "LoraProcess", 128 // Stack size
+              ,
+              NULL, 1 // Priority
+              ,
+              NULL);
 
-  // Now the task scheduler, which takes over control of scheduling individual tasks, is automatically started.
+  // Now the task scheduler, which takes over control of scheduling individual
+  // tasks, is automatically started.
 }
 
-void loop()
-{
+void loop() {
   // Empty. Things are done in Tasks.
 }
 
@@ -43,62 +84,135 @@ void loop()
 /*---------------------- Tasks ---------------------*/
 /*--------------------------------------------------*/
 
-void TaskSensor(void *pvParameters)  // This is a task.
+void TaskSensor(void *pvParameters) // This is a task.
 {
-  (void) pvParameters;
+  (void)pvParameters;
 
-/*
-  Sensor
-  Turns on an LED on for one second, then off for one second, repeatedly.
-
-  Most Arduinos have an on-board LED you can control. On the UNO, LEONARDO, MEGA, and ZERO 
-  it is attached to digital pin 13, on MKR1000 on pin 6. LED_BUILTIN takes care 
-  of use the correct LED pin whatever is the board used.
-  
-  The MICRO does not have a LED_BUILTIN available. For the MICRO board please substitute
-  the LED_BUILTIN definition with either LED_BUILTIN_RX or LED_BUILTIN_TX.
-  e.g. pinMode(LED_BUILTIN_RX, OUTPUT); etc.
-  
-  If you want to know what pin the on-board LED is connected to on your Arduino model, check
-  the Technical Specs of your board  at https://www.arduino.cc/en/Main/Products
-  
-  This example code is in the public domain.
-
-  modified 8 May 2014
-  by Scott Fitzgerald
-  
-  modified 2 Sep 2016
-  by Arturo Guadalupi
-*/
-
-  // initialize digital LED_BUILTIN on pin 13 as an output.
-  pinMode(LED_BUILTIN, OUTPUT);
+  // Task get sensor value every one second
 
   for (;;) // A Task shall never return or exit.
   {
-    digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
-    vTaskDelay( 1000 / portTICK_PERIOD_MS ); // wait for one second
-    digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
-    vTaskDelay( 1000 / portTICK_PERIOD_MS ); // wait for one second
+    float t = sht31.readTemperature();
+    float h = sht31.readHumidity();
+
+    if (!isnan(t)) { // check if 'is not a number'
+      Serial.print("Temp *C = ");
+      Serial.print(t);
+      Serial.print("\t\t");
+      temperature = t * 100;
+    } else {
+      Serial.println("Failed to read temperature");
+      temperature = -1;
+    }
+
+    if (!isnan(h)) { // check if 'is not a number'
+      Serial.print("Hum. % = ");
+      Serial.println(h);
+      humidity = h * 100;
+    } else {
+      humidity = -1;
+      Serial.println("Failed to read humidity");
+    }
+    vTaskDelay(pdMS_TO_TICKS(5000)); // wait for one second
   }
 }
 
-void TaskLoraProcess(void *pvParameters)  // This is a task.
+void TaskLoraProcess(void *pvParameters) // This is a task.
 {
-  (void) pvParameters;
-  
-/*
-  LoraProcessSerial
-  Reads an analog input on pin 0, prints the result to the serial monitor.
-  Graphical representation is available using serial plotter (Tools > Serial Plotter menu)
-  Attach the center pin of a potentiometer to pin A0, and the outside pins to +5V and ground.
+  (void)pvParameters;
+  String jsonBufferRx;
 
-  This example code is in the public domain.
-*/
+  for (;;) {
+    if (loraSerial.available()) {
+      jsonBufferRx = loraSerial.readString();
+      Serial.print("Received: ");
+      Serial.println(jsonBufferRx);
+      LoRaMessage receivedMessage = parseLoRaMessage(jsonBufferRx.c_str());
 
-  for (;;)
-  {
+      // only response if the address match
+      if (NODE == receivedMessage.nodeAddress) {
+        if (receivedMessage.command == 'g') {
+          // Handle "get" command
+          // Send sensor data as a response
+          char response[50];
+          snprintf(response, sizeof(response), "rp{%d:%d:%d}",
+                   receivedMessage.nodeAddress, (int)temperature,
+                   (int)humidity);
+          loraSerial.write((uint8_t *)response, strlen(response));
 
-    vTaskDelay(1);  // one tick delay (15ms) in between reads for stability
+        } else if (receivedMessage.command == 's') {
+          // Handle "set" command
+          // You can implement the relay control logic here
+          // For now, we'll send a response indicating success
+          char successResponse[30];
+          if (receivedMessage.value1 == 1) {
+            digitalWrite(LED_PIN, HIGH);
+            snprintf(successResponse, sizeof(successResponse), "rp{%d:0:0}",
+                     receivedMessage.nodeAddress);
+          } else if (receivedMessage.value1 == 0) {
+            digitalWrite(LED_PIN, LOW);
+            snprintf(successResponse, sizeof(successResponse), "rp{%d:0:0}",
+                     receivedMessage.nodeAddress);
+          } else {
+            snprintf(successResponse, sizeof(successResponse), "rp{%d:0:3}",
+                     receivedMessage.nodeAddress);
+          }
+
+          loraSerial.write((uint8_t *)successResponse, strlen(successResponse));
+
+        } else {
+          // Invalid command, send an error response
+          char invalidCommandResponse[30];
+          snprintf(invalidCommandResponse, sizeof(invalidCommandResponse),
+                   "rp{%d:0:2}", receivedMessage.nodeAddress);
+          loraSerial.write((uint8_t *)invalidCommandResponse,
+                           strlen(invalidCommandResponse));
+        }
+      }
+      // one tick delay (100ms) in between reads for stability
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
   }
+}
+LoRaMessage parseLoRaMessage(const char *message) {
+  LoRaMessage result;
+
+  if (strlen(message) < 8 || message[2] != '{' ||
+      message[strlen(message) - 1] != '}') {
+    // Invalid message format
+    result.command = 'r'; // Response with error code
+    result.nodeAddress = 0;
+    result.value1 = 0;
+    result.value2 = 1; // 1 for invalid message
+    return result;
+  }
+
+  result.command = message[0];
+  result.nodeAddress = atoi(&message[3]);
+
+  if (result.command == 'g') {
+    result.value1 = 0; // Initialize to default values for get command
+    result.value2 = 0;
+  } else if (result.command == 's' || result.command == 'r') {
+    char *endptr;
+
+    // Parse value1 and value2
+    result.value1 = strtol(&message[8], &endptr, 10);
+    if (*endptr != ':') {
+      // Invalid format
+      result.command = 'r'; // Response with error code
+      result.value1 = 0;
+      result.value2 = 2; // 2 for invalid format
+      return result;
+    }
+
+    result.value2 = strtol(endptr + 1, NULL, 10);
+  } else {
+    // Invalid command
+    result.command = 'r'; // Response with error code
+    result.value1 = 0;
+    result.value2 = 3; // 3 for invalid command
+  }
+
+  return result;
 }
