@@ -4,7 +4,7 @@
 #include <Arduino_FreeRTOS.h>
 #include <SoftwareSerial.h>
 
-#define NODE 1122
+#define NODE 1100
 
 typedef struct {
   char command; // 'g' for get, 's' for set, 'r' for response
@@ -14,8 +14,7 @@ typedef struct {
 } LoRaMessage;
 
 #define BAUDRATE 9600
-#define LORA_M0_PIN 6
-#define LORA_M1_PIN 7
+
 #define LED_PIN 13
 float humidity;
 float temperature;
@@ -47,11 +46,6 @@ void setup() {
   }
 
   // Just need this piece of code for LORA module
-  pinMode(LORA_M0_PIN, OUTPUT);
-  pinMode(LORA_M1_PIN, OUTPUT);
-  digitalWrite(LORA_M0_PIN, HIGH);
-  digitalWrite(LORA_M1_PIN, HIGH);
-
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
@@ -113,7 +107,7 @@ void TaskSensor(void *pvParameters) // This is a task.
       humidity = -1;
       Serial.println("Failed to read humidity");
     }
-    vTaskDelay(pdMS_TO_TICKS(5000)); // wait for one second
+    vTaskDelay(pdMS_TO_TICKS(5000)); // wait for five second
   }
 }
 

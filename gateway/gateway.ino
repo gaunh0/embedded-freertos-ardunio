@@ -6,8 +6,8 @@
 #define RXD2 16
 #define TXD2 17
 
-#define LORA_M0_PIN 22
-#define LORA_M1_PIN 23
+#define LORA_M0_PIN 18
+#define LORA_M1_PIN 19
 
 typedef struct {
   char command; // 'g' for get, 's' for set, 'r' for response
@@ -34,6 +34,8 @@ void setup() {
   digitalWrite(LORA_M0_PIN, LOW);
   digitalWrite(LORA_M1_PIN, LOW);
 
+  Serial.println("GATEWAY ONLINE");
+
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB, on LEONARDO,
       // MICRO, YUN, and other 32u4 based boards.
@@ -50,7 +52,7 @@ void setup() {
               ,
               NULL);
 
-  xTaskCreate(TaskLoraReceive, "LoraReceive", 1000 // Stack size
+  xTaskCreate(TaskLoraReceive, "LoraReceive", 2000 // Stack size
               ,
               NULL, 1 // Priority
               ,
@@ -68,36 +70,48 @@ void loop() {
 /*---------------------- Tasks ---------------------*/
 /*--------------------------------------------------*/
 
+/*
+st{1122:0:0} turn off LED
+st{1122:1:0} turn on LED
+gt{1122:0:0} get environment value
+*/
+
 void TaskLoraSend(void *pvParameters) // This is a task.
 {
   (void)pvParameters;
   int randomValue;
-
+  String bufferRx;
   bool isOpen = false;
   for (;;) // A Task shall never return or exit.
   {
-    randomValue = rand() % 20;
-    if (randomValue % 2 == 0) {
-      // snprintf(requestFrame, sizeof(requestFrame), "gt{1122:0:0}");
-      Serial2.print("gt{1122:0:0}");
-      Serial.print("Send: ");
-      Serial.println("gt{1122:0:0}");
-    } else {
-      if (isOpen) {
-        // snprintf(requestFrame, sizeof(requestFrame), "st{1122:0:0}");
-        Serial2.print("st{1122:0:0}");
-        Serial.print("Send: ");
-        Serial.println("st{1122:0:0}");
-        isOpen = !isOpen;
-      } else {
-        // snprintf(requestFrame, sizeof(requestFrame), "st{1122:0:1}");
-        Serial2.print("st{1122:0:1}");
-        Serial.print("Send: ");
-        Serial.println("st{1122:0:1}");
-      }
+    if (Serial.available()) {
+      bufferRx = Serial.readString();
+      Serial.print("Received from computer: ");
+      Serial.println(bufferRx);
+      Serial2.print(bufferRx);
     }
+    // randomValue = rand() % 20;
+    // if (randomValue % 2 == 0) {
+    //   // snprintf(requestFrame, sizeof(requestFrame), "gt{1122:0:0}");
+    //   Serial2.print("gt{1122:0:0}");
+    //   Serial.print("Send: ");
+    //   Serial.println("gt{1122:0:0}");
+    // } else {
+    //   if (isOpen) {
+    //     // snprintf(requestFrame, sizeof(requestFrame), "st{1122:0:0}");
+    //     Serial2.print("st{1122:0:0}");
+    //     Serial.print("Send: ");
+    //     Serial.println("st{1122:0:0}");
+    //     isOpen = !isOpen;
+    //   } else {
+    //     // snprintf(requestFrame, sizeof(requestFrame), "st{1122:0:1}");
+    //     Serial2.print("st{1122:0:1}");
+    //     Serial.print("Send: ");
+    //     Serial.println("st{1122:0:1}");
+    //   }
+    // }
 
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
@@ -105,12 +119,12 @@ void TaskLoraReceive(void *pvParameters) // This is a task.
 {
   (void)pvParameters;
   String jsonBufferRx;
-  float temperature ;
-  float humidity;
+  float temperature = 0;
+  float humidity = 0;
   for (;;) {
     if (Serial2.available()) {
       jsonBufferRx = Serial2.readString();
-      Serial.print("Received: ");
+      Serial.print("Received from node: ");
       Serial.println(jsonBufferRx);
       LoRaMessage receivedMessage = parseLoRaMessage(jsonBufferRx.c_str());
 
@@ -121,14 +135,16 @@ void TaskLoraReceive(void *pvParameters) // This is a task.
           Serial.println("Set command false");
         }
       } else {
-         temperature = receivedMessage.value1 / 100.0;
-         humidity = receivedMessage.value2 / 100.0;
+        temperature = receivedMessage.value1 / 100.0;
+        humidity = receivedMessage.value2 / 100.0;
 
         Serial.print("Temperature ");
         Serial.println(temperature);
         Serial.print("Humidity ");
         Serial.println(humidity);
       }
+      // clear this mf variable to ensure everything null for the next request
+      jsonBufferRx = "";
     }
     // one tick delay (100ms) in between reads for stability
     vTaskDelay(pdMS_TO_TICKS(10));

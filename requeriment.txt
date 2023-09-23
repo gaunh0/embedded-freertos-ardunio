@@ -1,2 +1,7 @@
 Arduino_FreeRTOS
 Adafruit_SHT31
+
+
+st{1122:0:0} turn off LED
+st{1122:1:0} turn on LED
+gt{1122:0:0} get environment value
